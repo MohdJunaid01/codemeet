@@ -43,8 +43,8 @@ const prompt = ai.definePrompt({
   {{#if history}}
   Here is the conversation history. Use it to provide a more relevant response:
   {{#each history}}
-  {{#if (eq role 'user')}}User: {{content}}{{/if}}
-  {{#if (eq role 'model')}}Assistant: {{content}}{{/if}}
+  {{#if (this.role === 'user')}}User: {{this.content}}{{/if}}
+  {{#if (this.role === 'model')}}Assistant: {{this.content}}{{/if}}
   {{/each}}
   {{/if}}
 

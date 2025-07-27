@@ -6,15 +6,17 @@ import { ControlBar } from "@/components/codemeet/control-bar";
 import { VideoParticipant } from "@/components/codemeet/video-participant";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useParams } from 'next/navigation';
 
-export default function MeetPage({ params }: { params: { id: string } }) {
+export default function MeetPage() {
   const { toast } = useToast();
   const searchParams = useSearchParams();
+  const params = useParams();
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [hasPermission, setHasPermission] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [userName, setUserName] = useState('You');
+  const id = params.id as string;
   
   useEffect(() => {
     const name = searchParams.get('name');
@@ -40,7 +42,12 @@ export default function MeetPage({ params }: { params: { id: string } }) {
         });
       }
     };
-    getMedia();
+    
+    // Only get media if permission hasn't been determined yet
+    if (hasPermission === false) {
+        getMedia();
+    }
+
 
     return () => {
         if (stream) {
@@ -55,7 +62,7 @@ export default function MeetPage({ params }: { params: { id: string } }) {
       <header className="p-4 border-b border-border flex items-center justify-between">
         <h1 className="text-2xl font-bold text-primary font-headline">CodeMeet</h1>
         <div className="text-sm text-muted-foreground">
-          Meeting ID: {params.id}
+          Meeting ID: {id}
         </div>
       </header>
 

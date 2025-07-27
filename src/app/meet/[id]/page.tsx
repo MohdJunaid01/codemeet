@@ -76,7 +76,7 @@ export default function MeetPage({ params }: { params: { id: string } }) {
                       <AlertTitle>Camera Access Required</AlertTitle>
                       <AlertDescription>
                           Please allow camera access to use this feature.
-                      </Aler tDescription>
+                      </AlertDescription>
                   </Alert>
                 )}
                 {hasPermission === null && (

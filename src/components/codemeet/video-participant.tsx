@@ -6,6 +6,7 @@ import Image from "next/image";
 import { MicOff, Pin, User } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import type Peer from 'simple-peer';
 
 type Participant = {
   id: string;
@@ -13,6 +14,7 @@ type Participant = {
   muted?: boolean;
   isScreenSharing?: boolean;
   stream: MediaStream | null;
+  peer?: Peer.Instance;
 };
 
 type VideoParticipantProps = {
@@ -32,10 +34,10 @@ export function VideoParticipant({ participant, isLarge = false }: VideoParticip
   return (
     <Card className={cn(
         "relative group overflow-hidden rounded-lg aspect-video transition-all duration-300 bg-card",
-        isLarge ? 'border-primary shadow-lg shadow-primary/20 col-span-full' : 'border-border'
+        isLarge ? 'border-primary shadow-lg shadow-primary/20' : 'border-border'
     )}>
       {participant.stream ? (
-        <video ref={videoRef} autoPlay muted={participant.id === "local"} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+        <video ref={videoRef} autoPlay playsInline muted={participant.name === 'You'} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
       ) : (
         <div className="w-full h-full flex items-center justify-center bg-card/80">
             <User className="h-1/3 w-1/3 text-muted-foreground" />

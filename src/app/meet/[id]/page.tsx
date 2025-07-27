@@ -10,8 +10,9 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { useSearchParams, useParams } from 'next/navigation';
 import type { Message } from '@/components/codemeet/chat-panel';
 import { database } from '@/lib/firebase';
-import { ref, onValue, onDisconnect, set, serverTimestamp } from 'firebase/database';
+import { ref, onValue, onDisconnect, set, serverTimestamp, get, onChildAdded, onChildRemoved, push, child } from 'firebase/database';
 import { v4 as uuidv4 } from 'uuid';
+import Peer from 'simple-peer';
 
 type Participant = {
   id: string;
@@ -19,6 +20,7 @@ type Participant = {
   stream: MediaStream | null;
   isScreenSharing: boolean;
   muted: boolean;
+  peer?: Peer.Instance;
 };
 
 export default function MeetPage() {
@@ -27,12 +29,12 @@ export default function MeetPage() {
   const params = useParams();
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [hasPermission, setHasPermission] = useState(false);
-  const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [userName, setUserName] = useState('You');
   const [messages, setMessages] = useState<Message[]>([]);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const localUserIdRef = useRef(uuidv4());
+  const peersRef = useRef<{[key: string]: Peer.Instance}>({});
   
   const id = params.id as string;
   
@@ -44,10 +46,9 @@ export default function MeetPage() {
   }, [searchParams]);
 
   useEffect(() => {
-    let stream: MediaStream | null = null;
     const getMedia = async () => {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         setLocalStream(stream);
         setHasPermission(true);
       } catch (error) {
@@ -62,51 +63,137 @@ export default function MeetPage() {
     };
     
     getMedia();
-
-    return () => {
-        if (stream) {
-            stream.getTracks().forEach(track => track.stop());
-        }
-    }
   }, [toast]);
 
   useEffect(() => {
-    if (!id || !userName || !hasPermission) return;
+    if (!id || !userName || !localStream) return;
 
     const meetingRef = ref(database, `meetings/${id}`);
-    const participantRef = ref(database, `meetings/${id}/participants/${localUserIdRef.current}`);
-    
+    const participantsRef = child(meetingRef, 'participants');
+    const localParticipantRef = child(participantsRef, localUserIdRef.current);
+    const signalsRef = child(meetingRef, 'signals');
+    const localSignalsRef = child(signalsRef, localUserIdRef.current);
+
     const presenceRef = ref(database, '.info/connected');
 
     onValue(presenceRef, (snap) => {
-        if (snap.val() === true) {
-            set(participantRef, {
-                name: userName,
-                joinedAt: serverTimestamp(),
+      if (snap.val() === true) {
+        set(localParticipantRef, { name: userName, joinedAt: serverTimestamp() });
+        onDisconnect(localParticipantRef).remove();
+        onDisconnect(child(signalsRef, localUserIdRef.current)).remove();
+      }
+    });
+
+    // Listen for new participants
+    onChildAdded(participantsRef, (snapshot) => {
+      const participantId = snapshot.key;
+      const participantData = snapshot.val();
+
+      if (participantId === localUserIdRef.current) return;
+      
+      console.log(`New participant joined: ${participantData.name}`);
+
+      const peer = new Peer({
+        initiator: true, // We are initiating the connection
+        trickle: false, // Use single signaling round
+        stream: localStream,
+      });
+
+      peer.on('signal', (signal) => {
+        // Send signal to the new participant
+        const signalRef = push(child(signalsRef, participantId));
+        set(signalRef, {
+            senderId: localUserIdRef.current,
+            signal: JSON.stringify(signal),
+        });
+      });
+
+      peer.on('stream', (stream) => {
+        console.log(`Receiving stream from ${participantData.name}`);
+        setParticipants(prev => prev.map(p => 
+            p.id === participantId ? { ...p, stream } : p
+        ));
+      });
+      
+      peer.on('close', () => {
+        console.log(`Connection closed with ${participantData.name}`);
+      });
+      
+      peer.on('error', (err) => {
+        console.error(`Error with peer ${participantData.name}:`, err);
+      });
+
+      peersRef.current[participantId] = peer;
+      setParticipants(prev => [...prev, { id: participantId, name: participantData.name, stream: null, isScreenSharing: false, muted: false, peer }]);
+    });
+
+    // Listen for signals intended for us
+    onChildAdded(localSignalsRef, (snapshot) => {
+        const { senderId, signal: receivedSignal } = snapshot.val();
+        const signal = JSON.parse(receivedSignal);
+
+        // If we are the initiator, we don't need to process our own signals
+        if(peersRef.current[senderId]) {
+            peersRef.current[senderId].signal(signal);
+            return;
+        }
+
+        console.log(`Received signal from ${senderId}`);
+        const peer = new Peer({
+            initiator: false,
+            trickle: false,
+            stream: localStream,
+        });
+
+        peer.signal(signal);
+
+        peer.on('signal', (signal) => {
+            const signalRef = push(child(signalsRef, senderId));
+            set(signalRef, {
+                senderId: localUserIdRef.current,
+                signal: JSON.stringify(signal),
             });
+        });
 
-            onDisconnect(participantRef).remove();
-        }
+        peer.on('stream', (stream) => {
+            console.log(`Receiving stream from ${senderId}`);
+            setParticipants(prev => prev.map(p => 
+                p.id === senderId ? { ...p, stream } : p
+            ));
+        });
+
+        peer.on('close', () => {
+          console.log(`Connection closed with ${senderId}`);
+        });
+
+        peer.on('error', (err) => {
+          console.error(`Error with peer ${senderId}:`, err);
+        });
+
+        peersRef.current[senderId] = peer;
     });
 
-    onValue(ref(database, `meetings/${id}/participants`), (snapshot) => {
-        const otherParticipants = snapshot.val() || {};
-        const newParticipants: Participant[] = [];
-        for (const participantId in otherParticipants) {
-            if (participantId !== localUserIdRef.current) {
-                newParticipants.push({
-                    id: participantId,
-                    name: otherParticipants[participantId].name,
-                    stream: null, // We'll handle streams in the next step
-                    isScreenSharing: false,
-                    muted: false,
-                })
-            }
+    // Listen for participants leaving
+    onChildRemoved(participantsRef, (snapshot) => {
+        const participantId = snapshot.key;
+        if (participantId === localUserIdRef.current) return;
+        
+        console.log(`Participant left: ${snapshot.val().name}`);
+        if(peersRef.current[participantId]) {
+            peersRef.current[participantId].destroy();
+            delete peersRef.current[participantId];
         }
-        setParticipants(newParticipants);
+        setParticipants(prev => prev.filter(p => p.id !== participantId));
     });
 
-  }, [id, userName, hasPermission]);
+    return () => {
+        // Clean up on component unmount
+        Object.values(peersRef.current).forEach(peer => peer.destroy());
+        set(localParticipantRef, null);
+        set(localSignalsRef, null);
+    }
+
+  }, [id, userName, localStream]);
 
 
   return (
@@ -121,9 +208,13 @@ export default function MeetPage() {
       <div className="flex flex-1 overflow-hidden">
         <main className="flex-1 flex flex-col gap-4 p-4 overflow-hidden">
           <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {localStream ? (
+            {localStream && (
                 <VideoParticipant participant={{ id: localUserIdRef.current, name: userName, stream: localStream, isScreenSharing: false, muted: true }} isLarge={participants.length === 0} />
-            ) : (
+            )}
+             {participants.map(p => (
+                <VideoParticipant key={p.id} participant={p} />
+            ))}
+            {!localStream && (
                 <div className="w-full h-full bg-card rounded-lg flex items-center justify-center col-span-full">
                   {!hasPermission ? (
                       <Alert variant="destructive" className="w-auto">
@@ -137,9 +228,6 @@ export default function MeetPage() {
                   )}
                 </div>
             )}
-            {participants.map(p => (
-                <VideoParticipant key={p.id} participant={p} />
-            ))}
           </div>
         </main>
         <ChatPanel 

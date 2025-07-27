@@ -4,7 +4,8 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { MeetingSummary } from "@/components/codemeet/meeting-summary";
-import { Mic, MicOff, Video, VideoOff, ScreenShare, PhoneOff, BrainCircuit } from "lucide-react";
+import { Mic, MicOff, Video, VideoOff, ScreenShare, PhoneOff, BrainCircuit, Users } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 type ControlBarProps = {
   localStream: MediaStream | null;
@@ -14,6 +15,7 @@ export function ControlBar({ localStream }: ControlBarProps) {
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [isSummaryOpen, setSummaryOpen] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     if (localStream) {
@@ -30,6 +32,15 @@ export function ControlBar({ localStream }: ControlBarProps) {
   const toggleAudio = () => setIsAudioMuted(prev => !prev);
   const toggleVideo = () => setIsVideoOff(prev => !prev);
 
+  const handleInvite = () => {
+    const meetingLink = window.location.href;
+    navigator.clipboard.writeText(meetingLink);
+    toast({
+      title: "Invite Link Copied!",
+      description: "You can now share the link with others.",
+    });
+  };
+
   return (
     <div className="flex items-center justify-between">
        <div className="text-sm text-muted-foreground">
@@ -37,6 +48,14 @@ export function ControlBar({ localStream }: ControlBarProps) {
       </div>
 
       <div className="flex items-center gap-2">
+        <Button 
+            variant="secondary" 
+            size="lg" 
+            onClick={handleInvite} 
+            className="rounded-full w-14 h-14"
+            >
+          <Users className="h-6 w-6" />
+        </Button>
         <Button 
             variant={isAudioMuted ? "destructive" : "secondary"} 
             size="lg" 

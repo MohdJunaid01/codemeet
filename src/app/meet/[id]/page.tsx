@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { ControlBar } from "@/components/codemeet/control-bar";
 import { VideoParticipant } from "@/components/codemeet/video-participant";
 import { ChatPanel } from "@/components/codemeet/chat-panel";
@@ -10,17 +10,16 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { useSearchParams, useParams } from 'next/navigation';
 import type { Message } from '@/components/codemeet/chat-panel';
 import { database } from '@/lib/firebase';
-import { ref, onValue, onDisconnect, set, serverTimestamp, get, onChildAdded, onChildRemoved, push, child } from 'firebase/database';
+import { ref, onValue, onDisconnect, set, serverTimestamp, get, onChildAdded, onChildRemoved, push, child, remove } from 'firebase/database';
 import { v4 as uuidv4 } from 'uuid';
 import Peer from 'simple-peer';
 
 type Participant = {
   id: string;
   name: string;
-  stream: MediaStream | null;
+  stream?: MediaStream;
   isScreenSharing: boolean;
   muted: boolean;
-  peer?: Peer.Instance;
 };
 
 export default function MeetPage() {
@@ -33,10 +32,10 @@ export default function MeetPage() {
   const [userName, setUserName] = useState('You');
   const [messages, setMessages] = useState<Message[]>([]);
   const [participants, setParticipants] = useState<Participant[]>([]);
+  
   const localUserIdRef = useRef(uuidv4());
   const peersRef = useRef<{[key: string]: Peer.Instance}>({});
-  
-  const id = params.id as string;
+  const meetingId = params.id as string;
   
   useEffect(() => {
     const name = searchParams.get('name');
@@ -44,6 +43,19 @@ export default function MeetPage() {
       setUserName(name);
     }
   }, [searchParams]);
+
+  const cleanup = useCallback(() => {
+    console.log("Cleaning up...");
+    localStream?.getTracks().forEach(track => track.stop());
+    const localId = localUserIdRef.current;
+    if (meetingId && localId) {
+        remove(ref(database, `meetings/${meetingId}/participants/${localId}`));
+        remove(ref(database, `meetings/${meetingId}/signals/${localId}`));
+    }
+    Object.values(peersRef.current).forEach(peer => peer.destroy());
+    peersRef.current = {};
+    setParticipants([]);
+}, [localStream, meetingId]);
 
   useEffect(() => {
     const getMedia = async () => {
@@ -63,122 +75,110 @@ export default function MeetPage() {
     };
     
     getMedia();
-  }, [toast]);
+
+    // Add cleanup listener for when the window is closed or reloaded
+    window.addEventListener('beforeunload', cleanup);
+    return () => {
+        cleanup();
+        window.removeEventListener('beforeunload', cleanup);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const createPeer = (targetId: string, initiator: boolean, stream: MediaStream): Peer.Instance => {
+    const peer = new Peer({
+        initiator,
+        trickle: false, // Simplifies signaling
+        stream,
+    });
+
+    peer.on('signal', (signalData) => {
+        // Send signal to the target participant
+        const signalRef = ref(database, `meetings/${meetingId}/signals/${targetId}/${localUserIdRef.current}`);
+        set(signalRef, JSON.stringify(signalData));
+    });
+
+    peer.on('stream', (remoteStream) => {
+        console.log('Received stream from', targetId);
+        setParticipants(prev =>
+            prev.map(p => (p.id === targetId ? { ...p, stream: remoteStream } : p))
+        );
+    });
+    
+    peer.on('close', () => {
+        console.log(`Connection closed with ${targetId}`);
+        peersRef.current[targetId]?.destroy();
+        delete peersRef.current[targetId];
+        setParticipants(prev => prev.filter(p => p.id !== targetId));
+    });
+
+    peer.on('error', (err) => {
+        console.error(`Error with peer ${targetId}:`, err);
+    });
+
+    return peer;
+  };
 
   useEffect(() => {
-    if (!id || !userName || !localStream) return;
+    if (!meetingId || !userName || !localStream) return;
 
-    const meetingRef = ref(database, `meetings/${id}`);
-    const participantsRef = child(meetingRef, 'participants');
-    const localParticipantRef = child(participantsRef, localUserIdRef.current);
-    const signalsRef = child(meetingRef, 'signals');
-    const localSignalsRef = child(signalsRef, localUserIdRef.current);
+    const localId = localUserIdRef.current;
+    const participantsRef = ref(database, `meetings/${meetingId}/participants`);
+    const localParticipantRef = child(participantsRef, localId);
+    const signalsRef = ref(database, `meetings/${meetingId}/signals/${localId}`);
 
-    const presenceRef = ref(database, '.info/connected');
-
-    onValue(presenceRef, (snap) => {
-      if (snap.val() === true) {
-        set(localParticipantRef, { name: userName, joinedAt: serverTimestamp() });
-        onDisconnect(localParticipantRef).remove();
-        onDisconnect(child(signalsRef, localUserIdRef.current)).remove();
-      }
+    const connectedRef = ref(database, '.info/connected');
+    onValue(connectedRef, (snap) => {
+        if (snap.val() === true) {
+            set(localParticipantRef, { name: userName, joinedAt: serverTimestamp() });
+            onDisconnect(localParticipantRef).remove();
+            onDisconnect(ref(database, `meetings/${meetingId}/signals/${localId}`)).remove();
+        }
     });
 
     // Listen for new participants
     onChildAdded(participantsRef, (snapshot) => {
-      const participantId = snapshot.key;
-      const participantData = snapshot.val();
+        const participantId = snapshot.key;
+        const participantData = snapshot.val();
+        if (!participantId || participantId === localId) return;
 
-      if (participantId === localUserIdRef.current) return;
-      
-      console.log(`New participant joined: ${participantData.name}`);
-
-      const peer = new Peer({
-        initiator: true, // We are initiating the connection
-        trickle: false, // Use single signaling round
-        stream: localStream,
-      });
-
-      peer.on('signal', (signal) => {
-        // Send signal to the new participant
-        const signalRef = push(child(signalsRef, participantId));
-        set(signalRef, {
-            senderId: localUserIdRef.current,
-            signal: JSON.stringify(signal),
-        });
-      });
-
-      peer.on('stream', (stream) => {
-        console.log(`Receiving stream from ${participantData.name}`);
-        setParticipants(prev => prev.map(p => 
-            p.id === participantId ? { ...p, stream } : p
-        ));
-      });
-      
-      peer.on('close', () => {
-        console.log(`Connection closed with ${participantData.name}`);
-      });
-      
-      peer.on('error', (err) => {
-        console.error(`Error with peer ${participantData.name}:`, err);
-      });
-
-      peersRef.current[participantId] = peer;
-      setParticipants(prev => [...prev, { id: participantId, name: participantData.name, stream: null, isScreenSharing: false, muted: false, peer }]);
+        console.log(`New participant joined: ${participantData.name}`);
+        setParticipants(prev => [...prev.filter(p => p.id !== participantId), { id: participantId, name: participantData.name, isScreenSharing: false, muted: false }]);
+        
+        const peer = createPeer(participantId, true, localStream);
+        peersRef.current[participantId] = peer;
     });
 
-    // Listen for signals intended for us
-    onChildAdded(localSignalsRef, (snapshot) => {
-        const { senderId, signal: receivedSignal } = snapshot.val();
-        const signal = JSON.parse(receivedSignal);
-
-        // If we are the initiator, we don't need to process our own signals
-        if(peersRef.current[senderId]) {
-            peersRef.current[senderId].signal(signal);
-            return;
-        }
+    // Listen for signals intended for the local user
+    onChildAdded(signalsRef, (snapshot) => {
+        const senderId = snapshot.key;
+        if (!senderId || senderId === localId) return;
 
         console.log(`Received signal from ${senderId}`);
-        const peer = new Peer({
-            initiator: false,
-            trickle: false,
-            stream: localStream,
-        });
-
-        peer.signal(signal);
-
-        peer.on('signal', (signal) => {
-            const signalRef = push(child(signalsRef, senderId));
-            set(signalRef, {
-                senderId: localUserIdRef.current,
-                signal: JSON.stringify(signal),
-            });
-        });
-
-        peer.on('stream', (stream) => {
-            console.log(`Receiving stream from ${senderId}`);
-            setParticipants(prev => prev.map(p => 
-                p.id === senderId ? { ...p, stream } : p
-            ));
-        });
-
-        peer.on('close', () => {
-          console.log(`Connection closed with ${senderId}`);
-        });
-
-        peer.on('error', (err) => {
-          console.error(`Error with peer ${senderId}:`, err);
-        });
-
-        peersRef.current[senderId] = peer;
+        const peer = peersRef.current[senderId] || createPeer(senderId, false, localStream);
+        
+        if (peer.destroyed) {
+            console.log("Cannot signal a destroyed peer");
+            return;
+        }
+        
+        try {
+            const signal = JSON.parse(snapshot.val());
+            peer.signal(signal);
+            peersRef.current[senderId] = peer;
+            // Clean up signal after processing
+            remove(snapshot.ref);
+        } catch (e) {
+            console.error("Failed to parse signal:", e);
+        }
     });
 
     // Listen for participants leaving
     onChildRemoved(participantsRef, (snapshot) => {
         const participantId = snapshot.key;
-        if (participantId === localUserIdRef.current) return;
+        if (!participantId || participantId === localId) return;
         
-        console.log(`Participant left: ${snapshot.val().name}`);
+        console.log(`Participant left: ${snapshot.val()?.name}`);
         if(peersRef.current[participantId]) {
             peersRef.current[participantId].destroy();
             delete peersRef.current[participantId];
@@ -187,13 +187,12 @@ export default function MeetPage() {
     });
 
     return () => {
-        // Clean up on component unmount
         Object.values(peersRef.current).forEach(peer => peer.destroy());
-        set(localParticipantRef, null);
-        set(localSignalsRef, null);
+        peersRef.current = {};
+        remove(localParticipantRef);
+        remove(signalsRef);
     }
-
-  }, [id, userName, localStream]);
+  }, [meetingId, userName, localStream, toast]);
 
 
   return (
@@ -201,7 +200,7 @@ export default function MeetPage() {
       <header className="p-4 border-b border-border flex items-center justify-between">
         <h1 className="text-2xl font-bold text-primary font-headline">CodeMeet</h1>
         <div className="text-sm text-muted-foreground">
-          Meeting ID: {id}
+          Meeting ID: {meetingId}
         </div>
       </header>
 

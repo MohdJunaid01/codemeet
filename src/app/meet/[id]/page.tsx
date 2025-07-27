@@ -16,12 +16,6 @@ export default function MeetPage({ params }: { params: { id: string } }) {
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [userName, setUserName] = useState('You');
   
-  const participants = [
-    { name: 'Alex', muted: false, isScreenSharing: false, stream: null },
-    { name: 'Sarah', muted: true, isScreenSharing: false, stream: null },
-    { name: 'Chris', muted: false, isScreenSharing: false, stream: null },
-  ];
-
   useEffect(() => {
     const name = searchParams.get('name');
     if (name) {
@@ -88,9 +82,6 @@ export default function MeetPage({ params }: { params: { id: string } }) {
 
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
           <VideoParticipant participant={{ name: userName, stream: localStream, isScreenSharing: false, muted: false }} />
-          {participants.map((p, index) => (
-            <VideoParticipant key={index} participant={p} />
-          ))}
         </div>
       </main>
 

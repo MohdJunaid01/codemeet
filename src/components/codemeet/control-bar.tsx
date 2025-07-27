@@ -53,7 +53,7 @@ export function ControlBar({ localStream }: ControlBarProps) {
   return (
     <div className="flex items-center justify-between">
        <div className="text-sm text-muted-foreground">
-        <p>In call with 3 others</p>
+        <p>You are in the call.</p>
       </div>
 
       <div className="flex items-center gap-2">

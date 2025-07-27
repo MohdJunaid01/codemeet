@@ -4,9 +4,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { ControlBar } from "@/components/codemeet/control-bar";
 import { VideoParticipant } from "@/components/codemeet/video-participant";
+import { ChatPanel } from "@/components/codemeet/chat-panel";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { useSearchParams, useParams } from 'next/navigation';
+import type { Message } from '@/components/codemeet/chat-panel';
 
 export default function MeetPage() {
   const { toast } = useToast();
@@ -15,7 +17,9 @@ export default function MeetPage() {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [hasPermission, setHasPermission] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
   const [userName, setUserName] = useState('You');
+  const [messages, setMessages] = useState<Message[]>([]);
   const id = params.id as string;
   
   useEffect(() => {
@@ -43,11 +47,7 @@ export default function MeetPage() {
       }
     };
     
-    // Only get media if permission hasn't been determined yet
-    if (hasPermission === false) {
-        getMedia();
-    }
-
+    getMedia();
 
     return () => {
         if (stream) {
@@ -66,32 +66,44 @@ export default function MeetPage() {
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col gap-4 p-4 overflow-hidden">
-        <div className="flex-1 rounded-lg overflow-hidden border border-primary shadow-lg shadow-primary/20">
-          {isScreenSharing ? (
-              <VideoParticipant participant={{ name: 'You', isScreenSharing: true, stream: localStream, muted: true }} isLarge />
-          ) : localStream ? (
-              <VideoParticipant participant={{ name: userName, stream: localStream, isScreenSharing: false, muted: true }} isLarge />
-          ) : (
-              <div className="w-full h-full bg-card rounded-lg flex items-center justify-center">
-                {hasPermission === false && (
-                    <Alert variant="destructive" className="w-auto">
-                      <AlertTitle>Camera Access Required</AlertTitle>
-                      <AlertDescription>
-                          Please allow camera access to use this feature.
-                      </AlertDescription>
-                  </Alert>
-                )}
-                {hasPermission === null && (
-                  <p className="text-muted-foreground">Requesting permissions...</p>
-                )}
-              </div>
-          )}
-        </div>
-      </main>
+      <div className="flex flex-1 overflow-hidden">
+        <main className="flex-1 flex flex-col gap-4 p-4 overflow-hidden">
+          <div className="flex-1 rounded-lg overflow-hidden border border-primary shadow-lg shadow-primary/20">
+            {isScreenSharing ? (
+                <VideoParticipant participant={{ name: 'You', isScreenSharing: true, stream: localStream, muted: true }} isLarge />
+            ) : localStream ? (
+                <VideoParticipant participant={{ name: userName, stream: localStream, isScreenSharing: false, muted: true }} isLarge />
+            ) : (
+                <div className="w-full h-full bg-card rounded-lg flex items-center justify-center">
+                  {!hasPermission ? (
+                      <Alert variant="destructive" className="w-auto">
+                        <AlertTitle>Camera Access Required</AlertTitle>
+                        <AlertDescription>
+                            Please allow camera access to use this feature.
+                        </AlertDescription>
+                    </Alert>
+                  ): (
+                    <p className="text-muted-foreground">Requesting permissions...</p>
+                  )}
+                </div>
+            )}
+          </div>
+        </main>
+        <ChatPanel 
+            isOpen={isChatOpen} 
+            onClose={() => setIsChatOpen(false)}
+            messages={messages}
+            setMessages={setMessages}
+            userName={userName}
+            />
+      </div>
 
       <footer className="py-3 px-4 border-t border-border bg-background/80 backdrop-blur-sm">
-        <ControlBar localStream={localStream} />
+        <ControlBar 
+            localStream={localStream} 
+            isChatOpen={isChatOpen}
+            onChatToggle={() => setIsChatOpen(prev => !prev)}
+            />
       </footer>
     </div>
   );

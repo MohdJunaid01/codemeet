@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { MeetingSummary } from "@/components/codemeet/meeting-summary";
 import { Mic, MicOff, Video, VideoOff, ScreenShare, PhoneOff, BrainCircuit, Users } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useRouter } from 'next/navigation';
 
 type ControlBarProps = {
   localStream: MediaStream | null;
@@ -16,6 +17,7 @@ export function ControlBar({ localStream }: ControlBarProps) {
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [isSummaryOpen, setSummaryOpen] = useState(false);
   const { toast } = useToast();
+  const router = useRouter();
 
   useEffect(() => {
     if (localStream) {
@@ -40,6 +42,13 @@ export function ControlBar({ localStream }: ControlBarProps) {
       description: "You can now share the link with others.",
     });
   };
+
+  const handleEndCall = () => {
+    if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+    }
+    router.push('/');
+  }
 
   return (
     <div className="flex items-center justify-between">
@@ -84,7 +93,7 @@ export function ControlBar({ localStream }: ControlBarProps) {
         </MeetingSummary>
       </div>
 
-      <Button variant="destructive" size="lg" className="h-12 px-6">
+      <Button variant="destructive" size="lg" className="h-12 px-6" onClick={handleEndCall}>
         <PhoneOff className="mr-2 h-5 w-5" />
         End Call
       </Button>

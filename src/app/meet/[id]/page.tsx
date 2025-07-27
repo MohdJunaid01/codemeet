@@ -49,7 +49,10 @@ export default function MeetPage() {
     localStream?.getTracks().forEach(track => track.stop());
     const localId = localUserIdRef.current;
     if (meetingId && localId) {
-        remove(ref(database, `meetings/${meetingId}/participants/${localId}`));
+        const localParticipantRef = ref(database, `meetings/${meetingId}/participants/${localId}`);
+        remove(localParticipantRef);
+        const localSignalsRef = ref(database, `meetings/${meetingId}/signals/${localId}`);
+        remove(localSignalsRef);
     }
     Object.values(peersRef.current).forEach(peer => peer.destroy());
     peersRef.current = {};
@@ -89,7 +92,6 @@ export default function MeetPage() {
     const participantsRef = ref(database, `meetings/${meetingId}/participants`);
     const localParticipantRef = ref(database, `meetings/${meetingId}/participants/${localId}`);
     
-    // Set up presence and disconnection logic
     const connectedRef = ref(database, '.info/connected');
     onValue(connectedRef, (snap) => {
         if (snap.val() === true) {
@@ -98,17 +100,15 @@ export default function MeetPage() {
         }
     });
 
-    // Function to create a peer connection
     const createPeer = (targetUserId: string, initiator: boolean): Peer.Instance => {
-        console.log(`Creating peer connection to ${targetUserId}, initiator: ${initiator}`);
+        console.log(`Creating peer to ${targetUserId} as ${initiator ? 'initiator' : 'receiver'}`);
         const peer = new Peer({
             initiator,
-            trickle: false,
+            trickle: true, // Use trickle for faster connection setup
             stream: localStream,
         });
 
         peer.on('signal', (signal) => {
-            console.log(`Sending signal from ${localId} to ${targetUserId}`);
             set(ref(database, `meetings/${meetingId}/signals/${targetUserId}/${localId}`), JSON.stringify(signal));
         });
 
@@ -118,7 +118,7 @@ export default function MeetPage() {
                 prev.map(p => (p.id === targetUserId ? { ...p, stream: remoteStream } : p))
             );
         });
-
+        
         peer.on('close', () => {
             console.log(`Peer connection closed with ${targetUserId}`);
             if (peersRef.current[targetUserId]) {
@@ -135,7 +135,6 @@ export default function MeetPage() {
         return peer;
     };
 
-    // Listen for new participants joining
     const participantsListener = onChildAdded(participantsRef, (snapshot) => {
         const participantId = snapshot.key;
         const participantData = snapshot.val();
@@ -143,29 +142,37 @@ export default function MeetPage() {
             return;
         }
 
-        console.log(`New participant detected: ${participantData.name} (${participantId})`);
+        console.log(`New participant joined: ${participantData.name} (${participantId})`);
         setParticipants(prev => [...prev, { id: participantId, name: participantData.name, isScreenSharing: false, muted: false }]);
         
-        // This user is the initiator
         const peer = createPeer(participantId, true);
         peersRef.current[participantId] = peer;
     });
 
-    // Listen for signals intended for the local user
     const signalsRef = ref(database, `meetings/${meetingId}/signals/${localId}`);
     const signalsListener = onChildAdded(signalsRef, (snapshot) => {
         const senderId = snapshot.key;
         if (!senderId) return;
 
         const signalData = JSON.parse(snapshot.val());
-        console.log(`Received signal from ${senderId}`);
 
         let peer = peersRef.current[senderId];
         if (!peer) {
-            console.log(`No peer for ${senderId}, creating one as non-initiator.`);
-            // This user is the receiver
+            console.log(`Received signal from ${senderId}, creating peer as receiver.`);
             peer = createPeer(senderId, false);
             peersRef.current[senderId] = peer;
+             setParticipants(prev => {
+                if (prev.find(p => p.id === senderId)) return prev;
+                // This case handles if the signal arrives before the participant is added
+                // This could happen due to firebase event ordering
+                const participantRef = ref(database, `meetings/${meetingId}/participants/${senderId}`);
+                onValue(participantRef, (snap) => {
+                    if (snap.exists()){
+                         setParticipants(p => [...p, { id: senderId, name: snap.val().name, isScreenSharing: false, muted: false }])
+                    }
+                }, { onlyOnce: true });
+                return prev;
+            });
         }
 
         if (peer.destroyed) {
@@ -174,11 +181,9 @@ export default function MeetPage() {
         }
 
         peer.signal(signalData);
-        // Remove the signal from DB after processing
-        remove(snapshot.ref);
+        remove(snapshot.ref); // Clean up signal
     });
 
-    // Listen for participants leaving
     const participantRemovedListener = onChildRemoved(participantsRef, (snapshot) => {
         const participantId = snapshot.key;
         if (!participantId || participantId === localId) return;
@@ -191,7 +196,6 @@ export default function MeetPage() {
         setParticipants(prev => prev.filter(p => p.id !== participantId));
     });
 
-    // Cleanup listeners on component unmount
     return () => {
         participantsRef.off('child_added', participantsListener);
         participantsRef.off('child_removed', participantRemovedListener);

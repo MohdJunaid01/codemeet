@@ -1,14 +1,34 @@
+
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { MeetingSummary } from "@/components/codemeet/meeting-summary";
-import { Mic, Video, ScreenShare, PhoneOff, BrainCircuit } from "lucide-react";
+import { Mic, MicOff, Video, VideoOff, ScreenShare, PhoneOff, BrainCircuit } from "lucide-react";
 
-export function ControlBar() {
-  const [isMuted, setIsMuted] = useState(false);
+type ControlBarProps = {
+  localStream: MediaStream | null;
+};
+
+export function ControlBar({ localStream }: ControlBarProps) {
+  const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [isSummaryOpen, setSummaryOpen] = useState(false);
+
+  useEffect(() => {
+    if (localStream) {
+      localStream.getAudioTracks().forEach(track => track.enabled = !isAudioMuted);
+    }
+  }, [localStream, isAudioMuted]);
+  
+  useEffect(() => {
+    if (localStream) {
+      localStream.getVideoTracks().forEach(track => track.enabled = !isVideoOff);
+    }
+  }, [localStream, isVideoOff]);
+
+  const toggleAudio = () => setIsAudioMuted(prev => !prev);
+  const toggleVideo = () => setIsVideoOff(prev => !prev);
 
   return (
     <div className="flex items-center justify-between">
@@ -17,13 +37,25 @@ export function ControlBar() {
       </div>
 
       <div className="flex items-center gap-2">
-        <Button variant={isMuted ? "destructive" : "secondary"} size="lg" onClick={() => setIsMuted(!isMuted)} className="rounded-full w-14 h-14">
-          <Mic className="h-6 w-6" />
+        <Button 
+            variant={isAudioMuted ? "destructive" : "secondary"} 
+            size="lg" 
+            onClick={toggleAudio} 
+            className="rounded-full w-14 h-14"
+            disabled={!localStream}
+            >
+          {isAudioMuted ? <MicOff className="h-6 w-6" /> : <Mic className="h-6 w-6" />}
         </Button>
-        <Button variant={isVideoOff ? "destructive" : "secondary"} size="lg" onClick={() => setIsVideoOff(!isVideoOff)} className="rounded-full w-14 h-14">
-          <Video className="h-6 w-6" />
+        <Button 
+            variant={isVideoOff ? "destructive" : "secondary"} 
+            size="lg" 
+            onClick={toggleVideo} 
+            className="rounded-full w-14 h-14"
+            disabled={!localStream}
+            >
+          {isVideoOff ? <VideoOff className="h-6 w-6" /> : <Video className="h-6 w-6" />}
         </Button>
-        <Button variant="secondary" size="lg" className="rounded-full w-14 h-14">
+        <Button variant="secondary" size="lg" className="rounded-full w-14 h-14" disabled={!localStream}>
           <ScreenShare className="h-6 w-6" />
         </Button>
          <MeetingSummary isOpen={isSummaryOpen} onOpenChange={setSummaryOpen}>

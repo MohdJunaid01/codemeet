@@ -1,13 +1,17 @@
+
+"use client";
+
+import { useRef, useEffect } from "react";
 import Image from "next/image";
-import { MicOff, Pin } from "lucide-react";
+import { MicOff, Pin, User } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 type Participant = {
   name: string;
-  muted: boolean;
-  isScreenSharing: boolean;
-  avatar: string;
+  muted?: boolean;
+  isScreenSharing?: boolean;
+  stream: MediaStream | null;
 };
 
 type VideoParticipantProps = {
@@ -16,18 +20,27 @@ type VideoParticipantProps = {
 };
 
 export function VideoParticipant({ participant, isLarge = false }: VideoParticipantProps) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (videoRef.current && participant.stream) {
+      videoRef.current.srcObject = participant.stream;
+    }
+  }, [participant.stream]);
+
   return (
     <Card className={cn(
-        "relative group overflow-hidden rounded-lg aspect-video transition-all duration-300",
+        "relative group overflow-hidden rounded-lg aspect-video transition-all duration-300 bg-card",
         isLarge ? 'border-primary shadow-lg shadow-primary/20' : 'border-border'
     )}>
-      <Image 
-        src="https://placehold.co/600x400.png" 
-        data-ai-hint="video call"
-        alt={`Video feed for ${participant.name}`} 
-        fill
-        className="object-cover group-hover:scale-105 transition-transform duration-300"
-      />
+      {participant.stream ? (
+        <video ref={videoRef} autoPlay muted={participant.name === 'You'} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center bg-card/80">
+            <User className="h-1/3 w-1/3 text-muted-foreground" />
+        </div>
+      )}
+
       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/10" />
       
       <div className="absolute bottom-0 left-0 p-3 flex items-center gap-2">

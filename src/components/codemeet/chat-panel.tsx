@@ -52,15 +52,7 @@ export function ChatPanel({ isOpen, onClose, messages, setMessages, userName }: 
             setLoadingAI(true);
             try {
                 const issue = newMessage.replace(/^@help\s*/, '');
-
-                const history = messages
-                    .filter(m => (m.isHelp && m.name === userName) || (m.isAIMessage))
-                    .map(m => ({
-                        role: m.isAIMessage ? 'model' as const : 'user' as const,
-                        content: m.text.replace(/^@help\s*/, ''),
-                    }));
-
-                const result = await techSupport({ issue, history });
+                const result = await techSupport({ issue });
                 const aiResponse: Message = {
                     id: uuidv4(),
                     name: "AI Support",

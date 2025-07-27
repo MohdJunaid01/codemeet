@@ -15,10 +15,6 @@ const TechSupportInputSchema = z.object({
   issue: z
     .string()
     .describe("The user's description of their technical issue."),
-  history: z.array(z.object({
-      role: z.enum(['user', 'model']),
-      content: z.string(),
-  })).optional().describe("The conversation history between the user and the AI assistant."),
 });
 export type TechSupportInput = z.infer<typeof TechSupportInputSchema>;
 
@@ -40,15 +36,7 @@ const prompt = ai.definePrompt({
   Provide a clear, concise, and friendly response to help them solve their issue.
   Assume the user is not highly technical.
 
-  {{#if history}}
-  Here is the conversation history. Use it to provide a more relevant response:
-  {{#each history}}
-  {{#if (this.role == 'user')}}User: {{this.content}}{{/if}}
-  {{#if (this.role == 'model')}}Assistant: {{this.content}}{{/if}}
-  {{/each}}
-  {{/if}}
-
-  User's Current Issue: {{{issue}}}
+  User's Issue: {{{issue}}}
   `,
 });
 

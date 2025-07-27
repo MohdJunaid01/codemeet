@@ -18,8 +18,6 @@ type Participant = {
   id: string;
   name: string;
   stream?: MediaStream;
-  isScreenSharing: boolean;
-  muted: boolean;
 };
 
 export default function MeetPage() {
@@ -104,12 +102,13 @@ export default function MeetPage() {
         console.log(`Creating peer to ${targetUserId} as ${initiator ? 'initiator' : 'receiver'}`);
         const peer = new Peer({
             initiator,
-            trickle: true, // Use trickle for faster connection setup
+            trickle: true,
             stream: localStream,
         });
 
         peer.on('signal', (signal) => {
-            set(ref(database, `meetings/${meetingId}/signals/${targetUserId}/${localId}`), JSON.stringify(signal));
+            const signalsRefForTarget = ref(database, `meetings/${meetingId}/signals/${targetUserId}/${localId}`);
+            set(signalsRefForTarget, JSON.stringify(signal));
         });
 
         peer.on('stream', (remoteStream) => {
@@ -143,10 +142,13 @@ export default function MeetPage() {
         }
 
         console.log(`New participant joined: ${participantData.name} (${participantId})`);
-        setParticipants(prev => [...prev, { id: participantId, name: participantData.name, isScreenSharing: false, muted: false }]);
         
         const peer = createPeer(participantId, true);
         peersRef.current[participantId] = peer;
+        setParticipants(prev => {
+            if (prev.find(p => p.id === participantId)) return prev;
+            return [...prev, { id: participantId, name: participantData.name }];
+        });
     });
 
     const signalsRef = ref(database, `meetings/${meetingId}/signals/${localId}`);
@@ -163,25 +165,21 @@ export default function MeetPage() {
             peersRef.current[senderId] = peer;
              setParticipants(prev => {
                 if (prev.find(p => p.id === senderId)) return prev;
-                // This case handles if the signal arrives before the participant is added
-                // This could happen due to firebase event ordering
                 const participantRef = ref(database, `meetings/${meetingId}/participants/${senderId}`);
                 onValue(participantRef, (snap) => {
                     if (snap.exists()){
-                         setParticipants(p => [...p, { id: senderId, name: snap.val().name, isScreenSharing: false, muted: false }])
+                         setParticipants(p => {
+                            if (p.find(participant => participant.id === senderId)) return p;
+                            return [...p, { id: senderId, name: snap.val().name }]
+                         });
                     }
                 }, { onlyOnce: true });
                 return prev;
             });
         }
-
-        if (peer.destroyed) {
-            console.warn(`Cannot signal a destroyed peer for ${senderId}`);
-            return;
-        }
-
+        
         peer.signal(signalData);
-        remove(snapshot.ref); // Clean up signal
+        remove(snapshot.ref);
     });
 
     const participantRemovedListener = onChildRemoved(participantsRef, (snapshot) => {
@@ -205,6 +203,11 @@ export default function MeetPage() {
   }, [meetingId, userName, localStream, cleanup]);
 
 
+  const allParticipants = [
+      ...(localStream ? [{ id: localUserIdRef.current, name: userName, stream: localStream }] : []),
+      ...participants
+  ];
+
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
       <header className="p-4 border-b border-border flex items-center justify-between">
@@ -215,15 +218,14 @@ export default function MeetPage() {
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        <main className="flex-1 flex flex-col gap-4 p-4 overflow-hidden">
-          <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-min">
-            {localStream && (
-                <VideoParticipant participant={{ id: localUserIdRef.current, name: userName, stream: localStream, isScreenSharing: false, muted: true }} isLarge={participants.length === 0} />
-            )}
-             {participants.map(p => (
-                <VideoParticipant key={p.id} participant={p} />
-            ))}
-            {!localStream && (
+        <main className="flex-1 flex items-center justify-center p-4 overflow-hidden">
+          {allParticipants.length > 0 ? (
+            <div className={`grid gap-4 w-full h-full grid-cols-1 md:grid-cols-2`}>
+                {allParticipants.map(p => (
+                    <VideoParticipant key={p.id} participant={p} />
+                ))}
+            </div>
+          ) : (
                 <div className="w-full h-full bg-card rounded-lg flex items-center justify-center col-span-full">
                   {!hasPermission ? (
                       <Alert variant="destructive" className="w-auto">
@@ -233,11 +235,10 @@ export default function MeetPage() {
                         </AlertDescription>
                     </Alert>
                   ): (
-                    <p className="text-muted-foreground">Requesting permissions...</p>
+                    <p className="text-muted-foreground">Waiting for others to join...</p>
                   )}
                 </div>
-            )}
-          </div>
+          )}
         </main>
         <ChatPanel 
             isOpen={isChatOpen} 

@@ -2,7 +2,6 @@
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
-import { CodeEditor } from "@/components/codemeet/code-editor";
 import { ControlBar } from "@/components/codemeet/control-bar";
 import { VideoParticipant } from "@/components/codemeet/video-participant";
 import { useToast } from "@/hooks/use-toast";
@@ -56,39 +55,34 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-4 p-4 overflow-hidden">
-        <div className="lg:col-span-2 flex flex-col gap-4">
-          <div className="flex-1 rounded-lg overflow-hidden border border-primary shadow-lg shadow-primary/20">
-            {isScreenSharing ? (
-               <VideoParticipant participant={{ name: 'You', isScreenSharing: true, stream: localStream, muted: true }} isLarge />
-            ) : localStream ? (
-               <VideoParticipant participant={{ name: 'You', stream: localStream, isScreenSharing: false, muted: false }} isLarge />
-            ) : (
-               <div className="w-full h-full bg-card rounded-lg flex items-center justify-center">
-                  {!hasPermission && (
-                     <Alert variant="destructive" className="w-auto">
-                        <AlertTitle>Camera Access Required</AlertTitle>
-                        <AlertDescription>
-                           Please allow camera access to use this feature.
-                        </AlertDescription>
-                    </Alert>
-                  )}
-                  {hasPermission === null && (
-                    <p className="text-muted-foreground">Requesting permissions...</p>
-                  )}
-               </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <VideoParticipant participant={{ name: 'You', stream: localStream, isScreenSharing: false, muted: false }} />
-            {participants.map((p, index) => (
-              <VideoParticipant key={index} participant={p} />
-            ))}
-          </div>
+      <main className="flex-1 flex flex-col gap-4 p-4 overflow-hidden">
+        <div className="flex-1 rounded-lg overflow-hidden border border-primary shadow-lg shadow-primary/20">
+          {isScreenSharing ? (
+              <VideoParticipant participant={{ name: 'You', isScreenSharing: true, stream: localStream, muted: true }} isLarge />
+          ) : localStream ? (
+              <VideoParticipant participant={{ name: 'You', stream: localStream, isScreenSharing: false, muted: false }} isLarge />
+          ) : (
+              <div className="w-full h-full bg-card rounded-lg flex items-center justify-center">
+                {!hasPermission && (
+                    <Alert variant="destructive" className="w-auto">
+                      <AlertTitle>Camera Access Required</AlertTitle>
+                      <AlertDescription>
+                          Please allow camera access to use this feature.
+                      </AlertDescription>
+                  </Alert>
+                )}
+                {hasPermission === null && (
+                  <p className="text-muted-foreground">Requesting permissions...</p>
+                )}
+              </div>
+          )}
         </div>
-        <div className="lg:col-span-1 h-full">
-          <CodeEditor />
+
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+          <VideoParticipant participant={{ name: 'You', stream: localStream, isScreenSharing: false, muted: false }} />
+          {participants.map((p, index) => (
+            <VideoParticipant key={index} participant={p} />
+          ))}
         </div>
       </main>
 

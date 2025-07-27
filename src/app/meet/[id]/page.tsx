@@ -43,20 +43,33 @@ export default function MeetPage() {
   }, [searchParams]);
 
   const cleanup = useCallback(() => {
-    console.log("Cleaning up for user:", localUserIdRef.current);
-    localStream?.getTracks().forEach(track => track.stop());
+    console.log("Running cleanup for user:", localUserIdRef.current);
     const localId = localUserIdRef.current;
+    
+    // Stop local media tracks
+    localStream?.getTracks().forEach(track => track.stop());
+
+    // Destroy all peer connections
+    Object.values(peersRef.current).forEach(peer => {
+        if (!peer.destroyed) {
+            peer.destroy();
+        }
+    });
+    peersRef.current = {};
+
+    // Remove user from database
     if (meetingId && localId) {
         const localParticipantRef = ref(database, `meetings/${meetingId}/participants/${localId}`);
         remove(localParticipantRef);
         const localSignalsRef = ref(database, `meetings/${meetingId}/signals/${localId}`);
         remove(localSignalsRef);
     }
-    Object.values(peersRef.current).forEach(peer => peer.destroy());
-    peersRef.current = {};
+    
     setParticipants([]);
+    setLocalStream(null);
   }, [localStream, meetingId]);
 
+  // Request media access and set up cleanup
   useEffect(() => {
     const getMedia = async () => {
       try {
@@ -77,45 +90,65 @@ export default function MeetPage() {
     getMedia();
 
     window.addEventListener('beforeunload', cleanup);
+
     return () => {
         cleanup();
         window.removeEventListener('beforeunload', cleanup);
     };
   }, [cleanup, toast]);
 
+
+  // Main WebRTC and Firebase Logic
   useEffect(() => {
-    if (!meetingId || !userName || !localStream) return;
+    if (!localStream || !meetingId || !userName) return;
 
     const localId = localUserIdRef.current;
     const participantsRef = ref(database, `meetings/${meetingId}/participants`);
     const localParticipantRef = ref(database, `meetings/${meetingId}/participants/${localId}`);
     
-    const connectedRef = ref(database, '.info/connected');
-    onValue(connectedRef, (snap) => {
+    // Set up presence and automatic disconnect
+    onValue(ref(database, '.info/connected'), (snap) => {
         if (snap.val() === true) {
             set(localParticipantRef, { name: userName, joinedAt: serverTimestamp() });
             onDisconnect(localParticipantRef).remove();
         }
     });
 
+    // Function to create a peer connection
     const createPeer = (targetUserId: string, initiator: boolean): Peer.Instance => {
-        console.log(`Creating peer to ${targetUserId} as ${initiator ? 'initiator' : 'receiver'}`);
+        console.log(`Creating peer connection to ${targetUserId} as ${initiator ? 'initiator' : 'receiver'}`);
         const peer = new Peer({
             initiator,
             trickle: true,
             stream: localStream,
         });
 
+        // Send signal data to the other peer via Firebase
         peer.on('signal', (signal) => {
             const signalsRefForTarget = ref(database, `meetings/${meetingId}/signals/${targetUserId}/${localId}`);
             set(signalsRefForTarget, JSON.stringify(signal));
         });
 
+        // Handle incoming stream from the other peer
         peer.on('stream', (remoteStream) => {
             console.log(`Received stream from ${targetUserId}`);
-            setParticipants(prev =>
-                prev.map(p => (p.id === targetUserId ? { ...p, stream: remoteStream } : p))
-            );
+            setParticipants(prev => {
+                // Avoid duplicates
+                if (prev.find(p => p.id === targetUserId)) {
+                   return prev.map(p => (p.id === targetUserId ? { ...p, stream: remoteStream } : p));
+                }
+                const newParticipant = { id: targetUserId, name: '...', stream: remoteStream };
+
+                // Fetch name for the new participant
+                 const participantRef = ref(database, `meetings/${meetingId}/participants/${targetUserId}`);
+                 onValue(participantRef, (snap) => {
+                    if (snap.exists()){
+                         setParticipants(p => p.map(participant => participant.id === targetUserId ? {...participant, name: snap.val().name} : participant));
+                    }
+                }, { onlyOnce: true });
+
+                return [...prev, newParticipant];
+            });
         });
         
         peer.on('close', () => {
@@ -129,11 +162,17 @@ export default function MeetPage() {
 
         peer.on('error', (err) => {
             console.error(`Peer error with ${targetUserId}:`, err);
+             if (peersRef.current[targetUserId]) {
+                peersRef.current[targetUserId].destroy();
+            }
         });
 
         return peer;
     };
 
+    // --- Firebase Listeners ---
+
+    // Listen for new participants joining the meeting
     const participantsListener = onChildAdded(participantsRef, (snapshot) => {
         const participantId = snapshot.key;
         const participantData = snapshot.val();
@@ -141,16 +180,19 @@ export default function MeetPage() {
             return;
         }
 
-        console.log(`New participant joined: ${participantData.name} (${participantId})`);
+        console.log(`A new participant joined: ${participantData.name} (${participantId})`);
         
+        // As the existing user, I will initiate the connection
         const peer = createPeer(participantId, true);
         peersRef.current[participantId] = peer;
+        
         setParticipants(prev => {
             if (prev.find(p => p.id === participantId)) return prev;
             return [...prev, { id: participantId, name: participantData.name }];
         });
     });
 
+    // Listen for signals intended for me
     const signalsRef = ref(database, `meetings/${meetingId}/signals/${localId}`);
     const signalsListener = onChildAdded(signalsRef, (snapshot) => {
         const senderId = snapshot.key;
@@ -159,11 +201,14 @@ export default function MeetPage() {
         const signalData = JSON.parse(snapshot.val());
 
         let peer = peersRef.current[senderId];
+        // If I am the initiator, I will ignore signals. The other peer will create the connection.
         if (!peer) {
-            console.log(`Received signal from ${senderId}, creating peer as receiver.`);
+            console.log(`Received signal from ${senderId}, creating a receiver peer.`);
             peer = createPeer(senderId, false);
             peersRef.current[senderId] = peer;
-             setParticipants(prev => {
+            
+            // Add participant to the list if not already there
+            setParticipants(prev => {
                 if (prev.find(p => p.id === senderId)) return prev;
                 const participantRef = ref(database, `meetings/${meetingId}/participants/${senderId}`);
                 onValue(participantRef, (snap) => {
@@ -179,9 +224,11 @@ export default function MeetPage() {
         }
         
         peer.signal(signalData);
+        // Remove the signal after processing
         remove(snapshot.ref);
     });
 
+    // Listen for participants leaving
     const participantRemovedListener = onChildRemoved(participantsRef, (snapshot) => {
         const participantId = snapshot.key;
         if (!participantId || participantId === localId) return;
@@ -194,13 +241,17 @@ export default function MeetPage() {
         setParticipants(prev => prev.filter(p => p.id !== participantId));
     });
 
+    // Return a cleanup function for this effect
     return () => {
+        console.log("Cleaning up Firebase listeners");
         participantsRef.off('child_added', participantsListener);
         participantsRef.off('child_removed', participantRemovedListener);
         signalsRef.off('child_added', signalsListener);
-        cleanup();
+        const connectedRef = ref(database, '.info/connected');
+        onValue(connectedRef, () => {}, { onlyOnce: true }); // Detach listener
+        onDisconnect(localParticipantRef).cancel(); // Cancel disconnect operation
     }
-  }, [meetingId, userName, localStream, cleanup]);
+  }, [meetingId, userName, localStream]);
 
 
   const allParticipants = [
@@ -220,7 +271,7 @@ export default function MeetPage() {
       <div className="flex flex-1 overflow-hidden">
         <main className="flex-1 flex items-center justify-center p-4 overflow-hidden">
           {allParticipants.length > 0 ? (
-            <div className={`grid gap-4 w-full h-full grid-cols-1 md:grid-cols-2`}>
+            <div className={`grid gap-4 w-full h-full grid-cols-1 md:grid-cols-${allParticipants.length > 1 ? '2' : '1'} lg:grid-cols-${allParticipants.length > 4 ? '3' : (allParticipants.length > 1 ? '2' : '1')}`}>
                 {allParticipants.map(p => (
                     <VideoParticipant key={p.id} participant={p} />
                 ))}
@@ -258,4 +309,5 @@ export default function MeetPage() {
       </footer>
     </div>
   );
-}
+
+    

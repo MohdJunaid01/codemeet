@@ -24,9 +24,10 @@ export default function MeetPage({ params }: { params: { id: string } }) {
   }, [searchParams]);
 
   useEffect(() => {
+    let stream: MediaStream | null = null;
     const getMedia = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         setLocalStream(stream);
         setHasPermission(true);
       } catch (error) {
@@ -42,11 +43,12 @@ export default function MeetPage({ params }: { params: { id: string } }) {
     getMedia();
 
     return () => {
-      if (localStream) {
-        localStream.getTracks().forEach(track => track.stop());
-      }
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+        }
     }
-  }, [localStream, toast]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
@@ -62,10 +64,10 @@ export default function MeetPage({ params }: { params: { id: string } }) {
           {isScreenSharing ? (
               <VideoParticipant participant={{ name: 'You', isScreenSharing: true, stream: localStream, muted: true }} isLarge />
           ) : localStream ? (
-              <VideoParticipant participant={{ name: userName, stream: localStream, isScreenSharing: false, muted: false }} isLarge />
+              <VideoParticipant participant={{ name: userName, stream: localStream, isScreenSharing: false, muted: true }} isLarge />
           ) : (
               <div className="w-full h-full bg-card rounded-lg flex items-center justify-center">
-                {!hasPermission && (
+                {hasPermission === false && (
                     <Alert variant="destructive" className="w-auto">
                       <AlertTitle>Camera Access Required</AlertTitle>
                       <AlertDescription>
@@ -78,10 +80,6 @@ export default function MeetPage({ params }: { params: { id: string } }) {
                 )}
               </div>
           )}
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-          <VideoParticipant participant={{ name: userName, stream: localStream, isScreenSharing: false, muted: false }} />
         </div>
       </main>
 

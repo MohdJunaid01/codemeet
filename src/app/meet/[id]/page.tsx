@@ -9,6 +9,17 @@ import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { useSearchParams, useParams } from 'next/navigation';
 import type { Message } from '@/components/codemeet/chat-panel';
+import { database } from '@/lib/firebase';
+import { ref, onValue, onDisconnect, set, serverTimestamp } from 'firebase/database';
+import { v4 as uuidv4 } from 'uuid';
+
+type Participant = {
+  id: string;
+  name: string;
+  stream: MediaStream | null;
+  isScreenSharing: boolean;
+  muted: boolean;
+};
 
 export default function MeetPage() {
   const { toast } = useToast();
@@ -20,6 +31,9 @@ export default function MeetPage() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [userName, setUserName] = useState('You');
   const [messages, setMessages] = useState<Message[]>([]);
+  const [participants, setParticipants] = useState<Participant[]>([]);
+  const localUserIdRef = useRef(uuidv4());
+  
   const id = params.id as string;
   
   useEffect(() => {
@@ -54,8 +68,46 @@ export default function MeetPage() {
             stream.getTracks().forEach(track => track.stop());
         }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [toast]);
+
+  useEffect(() => {
+    if (!id || !userName || !hasPermission) return;
+
+    const meetingRef = ref(database, `meetings/${id}`);
+    const participantRef = ref(database, `meetings/${id}/participants/${localUserIdRef.current}`);
+    
+    const presenceRef = ref(database, '.info/connected');
+
+    onValue(presenceRef, (snap) => {
+        if (snap.val() === true) {
+            set(participantRef, {
+                name: userName,
+                joinedAt: serverTimestamp(),
+            });
+
+            onDisconnect(participantRef).remove();
+        }
+    });
+
+    onValue(ref(database, `meetings/${id}/participants`), (snapshot) => {
+        const otherParticipants = snapshot.val() || {};
+        const newParticipants: Participant[] = [];
+        for (const participantId in otherParticipants) {
+            if (participantId !== localUserIdRef.current) {
+                newParticipants.push({
+                    id: participantId,
+                    name: otherParticipants[participantId].name,
+                    stream: null, // We'll handle streams in the next step
+                    isScreenSharing: false,
+                    muted: false,
+                })
+            }
+        }
+        setParticipants(newParticipants);
+    });
+
+  }, [id, userName, hasPermission]);
+
 
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
@@ -68,13 +120,11 @@ export default function MeetPage() {
 
       <div className="flex flex-1 overflow-hidden">
         <main className="flex-1 flex flex-col gap-4 p-4 overflow-hidden">
-          <div className="flex-1 rounded-lg overflow-hidden border border-primary shadow-lg shadow-primary/20">
-            {isScreenSharing ? (
-                <VideoParticipant participant={{ name: 'You', isScreenSharing: true, stream: localStream, muted: true }} isLarge />
-            ) : localStream ? (
-                <VideoParticipant participant={{ name: userName, stream: localStream, isScreenSharing: false, muted: true }} isLarge />
+          <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {localStream ? (
+                <VideoParticipant participant={{ id: localUserIdRef.current, name: userName, stream: localStream, isScreenSharing: false, muted: true }} isLarge={participants.length === 0} />
             ) : (
-                <div className="w-full h-full bg-card rounded-lg flex items-center justify-center">
+                <div className="w-full h-full bg-card rounded-lg flex items-center justify-center col-span-full">
                   {!hasPermission ? (
                       <Alert variant="destructive" className="w-auto">
                         <AlertTitle>Camera Access Required</AlertTitle>
@@ -87,6 +137,9 @@ export default function MeetPage() {
                   )}
                 </div>
             )}
+            {participants.map(p => (
+                <VideoParticipant key={p.id} participant={p} />
+            ))}
           </div>
         </main>
         <ChatPanel 

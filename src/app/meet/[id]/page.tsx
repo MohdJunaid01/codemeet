@@ -1,18 +1,23 @@
 
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ControlBar } from "@/components/codemeet/control-bar";
 import { VideoParticipant } from "@/components/codemeet/video-participant";
 import { ChatPanel } from "@/components/codemeet/chat-panel";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
-import { useSearchParams, useParams } from 'next/navigation';
+import { useSearchParams, useParams, useRouter } from 'next/navigation';
 import type { Message } from '@/components/codemeet/chat-panel';
 import { database } from '@/lib/firebase';
 import { ref, onValue, onDisconnect, set, serverTimestamp, onChildAdded, onChildRemoved, remove, off, get } from 'firebase/database';
 import { v4 as uuidv4 } from 'uuid';
 import Peer from 'simple-peer';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { User } from 'lucide-react';
 
 type Participant = {
   id: string;
@@ -24,10 +29,15 @@ export default function MeetPage() {
   const { toast } = useToast();
   const searchParams = useSearchParams();
   const params = useParams();
+  const router = useRouter();
+
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [hasPermission, setHasPermission] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [userName, setUserName] = useState('You');
+  
+  const [userName, setUserName] = useState('');
+  const [isNameSet, setIsNameSet] = useState(false);
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [participants, setParticipants] = useState<Participant[]>([]);
   
@@ -39,6 +49,7 @@ export default function MeetPage() {
     const name = searchParams.get('name');
     if (name) {
       setUserName(name);
+      setIsNameSet(true);
     }
   }, [searchParams]);
   
@@ -61,18 +72,20 @@ export default function MeetPage() {
       }
     };
     
-    getMedia();
+    if (isNameSet) {
+        getMedia();
+    }
 
     return () => {
         stream?.getTracks().forEach(track => track.stop());
     }
 
-  }, [toast]);
+  }, [toast, isNameSet]);
 
 
   // Main WebRTC and Firebase Logic
   useEffect(() => {
-    if (!localStream || !meetingId || !userName || !hasPermission) return;
+    if (!localStream || !meetingId || !userName || !hasPermission || !isNameSet) return;
 
     const localId = localUserIdRef.current;
     const participantsRef = ref(database, `meetings/${meetingId}/participants`);
@@ -214,7 +227,59 @@ export default function MeetPage() {
 
         onDisconnect(localParticipantRefOnCleanup).cancel();
     }
-  }, [meetingId, userName, localStream, hasPermission, toast]);
+  }, [meetingId, userName, localStream, hasPermission, toast, isNameSet]);
+
+
+  const handleNameSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userName.trim()) {
+        toast({
+            variant: "destructive",
+            title: "Name is required",
+            description: "Please enter your name to join the meeting.",
+        });
+        return;
+    }
+    // Update the URL without reloading the page
+    router.replace(`/meet/${meetingId}?name=${encodeURIComponent(userName)}`);
+    setIsNameSet(true);
+  }
+
+  if (!isNameSet) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground p-4">
+             <Card className="w-full max-w-md shadow-lg shadow-primary/10">
+                <CardHeader>
+                    <CardTitle className="text-2xl font-headline text-center">Join Meeting</CardTitle>
+                    <CardDescription className="text-center">
+                        Enter your name to join the call.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <form onSubmit={handleNameSubmit} className="space-y-4">
+                         <div className="space-y-2">
+                            <Label htmlFor="name">Your Name</Label>
+                            <div className="relative">
+                                <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                <Input
+                                id="name"
+                                placeholder="Enter your name"
+                                value={userName}
+                                onChange={(e) => setUserName(e.target.value)}
+                                className="pl-10"
+                                autoFocus
+                                />
+                            </div>
+                        </div>
+                        <Button type="submit" className="w-full">
+                            Join Call
+                        </Button>
+                    </form>
+                </CardContent>
+            </Card>
+        </div>
+      );
+  }
 
 
   const allParticipants = [
@@ -269,3 +334,6 @@ export default function MeetPage() {
     </div>
   );
 }
+
+
+    

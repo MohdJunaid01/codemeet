@@ -95,7 +95,7 @@ export default function HomePage() {
           </div>
           
           <div className="flex flex-col sm:flex-row gap-2">
-             <Button onClick={handleCreateMeeting} className="flex-1" size="lg">
+             <Button onClick={handleCreateMeeting} className="flex-1" size="lg" disabled={!name.trim()}>
                 <Plus className="mr-2 h-5 w-5" />
                 New Meeting
             </Button>
@@ -131,7 +131,7 @@ export default function HomePage() {
               value={meetingCode}
               onChange={(e) => setMeetingCode(e.target.value)}
             />
-            <Button type="submit" variant="outline" disabled={!meetingCode.trim()}>
+            <Button type="submit" variant="outline" disabled={!meetingCode.trim() || !name.trim()}>
               Join
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
@@ -144,3 +144,5 @@ export default function HomePage() {
     </div>
   );
 }
+
+    

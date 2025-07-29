@@ -10,7 +10,7 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { useSearchParams, useParams } from 'next/navigation';
 import type { Message } from '@/components/codemeet/chat-panel';
 import { database } from '@/lib/firebase';
-import { ref, onValue, onDisconnect, set, serverTimestamp, onChildAdded, onChildRemoved, remove, off } from 'firebase/database';
+import { ref, onValue, onDisconnect, set, serverTimestamp, onChildAdded, onChildRemoved, remove, off, DatabaseReference } from 'firebase/database';
 import { v4 as uuidv4 } from 'uuid';
 import Peer from 'simple-peer';
 
@@ -141,8 +141,8 @@ export default function MeetPage() {
                 const newParticipant = { id: targetUserId, name: '...', stream: remoteStream };
 
                 // Fetch name for the new participant
-                 const participantRef = ref(database, `meetings/${meetingId}/participants/${targetUserId}`);
-                 onValue(participantRef, (snap) => {
+                 const participantNameRef = ref(database, `meetings/${meetingId}/participants/${targetUserId}`);
+                 onValue(participantNameRef, (snap) => {
                     if (snap.exists()){
                          setParticipants(p => p.map(participant => participant.id === targetUserId ? {...participant, name: snap.val().name} : participant));
                     }
@@ -211,8 +211,8 @@ export default function MeetPage() {
             // Add participant to the list if not already there
             setParticipants(prev => {
                 if (prev.find(p => p.id === senderId)) return prev;
-                const participantRef = ref(database, `meetings/${meetingId}/participants/${senderId}`);
-                onValue(participantRef, (snap) => {
+                const participantNameRef = ref(database, `meetings/${meetingId}/participants/${senderId}`);
+                onValue(participantNameRef, (snap) => {
                     if (snap.exists()){
                          setParticipants(p => {
                             if (p.find(participant => participant.id === senderId)) return p;
@@ -249,6 +249,7 @@ export default function MeetPage() {
         off(participantsRef, 'child_removed', participantRemovedListener);
         off(signalsRef, 'child_added', signalsListener);
         off(connectedRef, 'value', connectedListener);
+        const localParticipantRef = ref(database, `meetings/${meetingId}/participants/${localUserIdRef.current}`);
         onDisconnect(localParticipantRef).cancel(); // Cancel disconnect operation
     }
   }, [meetingId, userName, localStream]);
@@ -309,3 +310,4 @@ export default function MeetPage() {
       </footer>
     </div>
   );
+}

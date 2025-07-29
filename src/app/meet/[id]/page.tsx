@@ -10,7 +10,7 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { useSearchParams, useParams } from 'next/navigation';
 import type { Message } from '@/components/codemeet/chat-panel';
 import { database } from '@/lib/firebase';
-import { ref, onValue, onDisconnect, set, serverTimestamp, onChildAdded, onChildRemoved, remove } from 'firebase/database';
+import { ref, onValue, onDisconnect, set, serverTimestamp, onChildAdded, onChildRemoved, remove, off } from 'firebase/database';
 import { v4 as uuidv4 } from 'uuid';
 import Peer from 'simple-peer';
 
@@ -107,7 +107,8 @@ export default function MeetPage() {
     const localParticipantRef = ref(database, `meetings/${meetingId}/participants/${localId}`);
     
     // Set up presence and automatic disconnect
-    onValue(ref(database, '.info/connected'), (snap) => {
+    const connectedRef = ref(database, '.info/connected');
+    const connectedListener = onValue(connectedRef, (snap) => {
         if (snap.val() === true) {
             set(localParticipantRef, { name: userName, joinedAt: serverTimestamp() });
             onDisconnect(localParticipantRef).remove();
@@ -244,11 +245,10 @@ export default function MeetPage() {
     // Return a cleanup function for this effect
     return () => {
         console.log("Cleaning up Firebase listeners");
-        participantsRef.off('child_added', participantsListener);
-        participantsRef.off('child_removed', participantRemovedListener);
-        signalsRef.off('child_added', signalsListener);
-        const connectedRef = ref(database, '.info/connected');
-        onValue(connectedRef, () => {}, { onlyOnce: true }); // Detach listener
+        off(participantsRef, 'child_added', participantsListener);
+        off(participantsRef, 'child_removed', participantRemovedListener);
+        off(signalsRef, 'child_added', signalsListener);
+        off(connectedRef, 'value', connectedListener);
         onDisconnect(localParticipantRef).cancel(); // Cancel disconnect operation
     }
   }, [meetingId, userName, localStream]);
@@ -309,5 +309,3 @@ export default function MeetPage() {
       </footer>
     </div>
   );
-
-    

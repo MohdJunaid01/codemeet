@@ -205,9 +205,9 @@ export default function MeetPage() {
 
     // --- Cleanup function for this effect ---
     return () => {
+        const localId = localUserIdRef.current;
         console.log(`[${localId}] Cleaning up main effect.`);
         
-        const localId = localUserIdRef.current;
         const localParticipantRef = ref(database, `meetings/${meetingId}/participants/${localId}`);
         remove(localParticipantRef);
         

@@ -37,7 +37,7 @@ export function ControlBar({ localStream, isChatOpen, onChatToggle }: ControlBar
   const toggleVideo = () => setIsVideoOff(prev => !prev);
 
   const handleInvite = () => {
-    const meetingLink = window.location.href;
+    const meetingLink = `${window.location.origin}${window.location.pathname}`;
     navigator.clipboard.writeText(meetingLink);
     toast({
       title: "Invite Link Copied!",

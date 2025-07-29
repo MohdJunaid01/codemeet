@@ -44,9 +44,10 @@ export default function MeetPage() {
   
   // Request media access
   useEffect(() => {
+    let stream: MediaStream;
     const getMedia = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         setLocalStream(stream);
         setHasPermission(true);
       } catch (error) {
@@ -63,10 +64,10 @@ export default function MeetPage() {
     getMedia();
 
     return () => {
-        localStream?.getTracks().forEach(track => track.stop());
+        stream?.getTracks().forEach(track => track.stop());
     }
 
-  }, [toast, localStream]);
+  }, [toast]);
 
 
   // Main WebRTC and Firebase Logic
@@ -268,5 +269,3 @@ export default function MeetPage() {
     </div>
   );
 }
-
-    
